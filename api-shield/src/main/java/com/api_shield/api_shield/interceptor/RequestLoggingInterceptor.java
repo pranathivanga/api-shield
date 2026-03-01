@@ -1,5 +1,7 @@
 package com.api_shield.api_shield.interceptor;
 
+import com.api_shield.api_shield.user.User;
+import com.api_shield.api_shield.user.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -17,9 +19,12 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
     private static final int BAN_SECONDS = 300;
 
     private final RedisTemplate<String, String> redisTemplate;
+    private final UserRepository userRepository;
 
-    public RequestLoggingInterceptor(RedisTemplate<String, String> redisTemplate) {
+    public RequestLoggingInterceptor(RedisTemplate<String, String> redisTemplate,
+                                     UserRepository userRepository) {
         this.redisTemplate = redisTemplate;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -28,19 +33,17 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
             HttpServletResponse response,
             Object handler) throws IOException {
 
-        // 🔹 Extract user info ONCE
+        // 🔹 1. Get userId from header
         String userId = request.getHeader("X-User-Id");
-        String userTier = request.getHeader("X-User-Tier");
-
         if (userId == null || userId.isBlank()) {
             userId = "anonymous";
         }
 
-        if (userTier == null || userTier.isBlank()) {
-            userTier = "FREE";
-        }
+        // 🔹 2. Fetch user tier from DB
+        User user = userRepository.findById(userId).orElse(null);
+        String userTier = (user != null) ? user.getTier() : "FREE";
 
-        // 🔴 1. Check if user is banned
+        // 🔴 3. Check if user is banned
         String banKey = "banned:" + userId;
         Boolean isBanned = redisTemplate.hasKey(banKey);
 
@@ -50,16 +53,16 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
             response.setStatus(403);
             response.setContentType("application/json");
 
-            String body = String.format(
-                    "{\"status\":403,\"error\":\"USER_TEMPORARILY_BLOCKED\",\"retryAfterSeconds\":%d}",
-                    ttl
+            response.getWriter().write(
+                    String.format(
+                            "{\"status\":403,\"error\":\"USER_TEMPORARILY_BLOCKED\",\"retryAfterSeconds\":%d}",
+                            ttl
+                    )
             );
-
-            response.getWriter().write(body);
             return false;
         }
 
-        // 🔹 2. Rate limiting (user-based)
+        // 🔹 4. Rate limiting
         int userLimit = getLimitForTier(userTier);
 
         String path = request.getRequestURI();
@@ -73,7 +76,7 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
 
         if (count != null && count > userLimit) {
 
-            // 🔴 3. Track violations
+            // 🔴 5. Track violations
             String violationKey = "violation:" + userId;
             Long violations = redisTemplate.opsForValue().increment(violationKey);
 
@@ -81,7 +84,7 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
                 redisTemplate.expire(violationKey, 600, TimeUnit.SECONDS);
             }
 
-            // 🔴 4. Ban if too many violations
+            // 🔴 6. Ban user if violations exceed limit
             if (violations != null && violations > MAX_VIOLATIONS) {
 
                 redisTemplate.opsForValue()
@@ -90,31 +93,31 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
                 response.setStatus(403);
                 response.setContentType("application/json");
 
-                String body = String.format(
-                        "{\"status\":403,\"error\":\"USER_TEMPORARILY_BLOCKED\",\"banDurationSeconds\":%d}",
-                        BAN_SECONDS
+                response.getWriter().write(
+                        String.format(
+                                "{\"status\":403,\"error\":\"USER_TEMPORARILY_BLOCKED\",\"banDurationSeconds\":%d}",
+                                BAN_SECONDS
+                        )
                 );
-
-                response.getWriter().write(body);
                 return false;
             }
 
-            // 🔹 5. Normal rate limit response
+            // 🔹 7. Normal rate limit response
             Long retryAfter = redisTemplate.getExpire(rateKey, TimeUnit.SECONDS);
 
             response.setStatus(429);
             response.setContentType("application/json");
             response.setHeader("Retry-After", String.valueOf(retryAfter));
 
-            String body = String.format(
-                    "{\"status\":429,\"error\":\"RATE_LIMIT_EXCEEDED\",\"tier\":\"%s\",\"limit\":%d,\"violations\":%d,\"retryAfterSeconds\":%d}",
-                    userTier,
-                    userLimit,
-                    violations,
-                    retryAfter
+            response.getWriter().write(
+                    String.format(
+                            "{\"status\":429,\"error\":\"RATE_LIMIT_EXCEEDED\",\"tier\":\"%s\",\"limit\":%d,\"violations\":%d,\"retryAfterSeconds\":%d}",
+                            userTier,
+                            userLimit,
+                            violations,
+                            retryAfter
+                    )
             );
-
-            response.getWriter().write(body);
             return false;
         }
 

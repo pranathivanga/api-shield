@@ -3,4 +3,17 @@ spring:
     name: api-shield
   redis:
     host: localhost
-    port: 6379
+  datasource:
+    url: jdbc:h2:mem:apishield
+    driverClassName: org.h2.Driver
+    username: sa
+    password: ""
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+  h2:
+    console:
+      enabled: true
