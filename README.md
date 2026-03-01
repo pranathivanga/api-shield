@@ -79,12 +79,12 @@ cd api-shield
 
 ## 🔍 Testing
 
-# Use request header:
+** Use request header:
 
 X-User-Id: 101   (FREE)
 X-User-Id: 202   (PREMIUM)
 
-# Behavior:
+** Behavior:
 
 FREE users → lower request limit
 
