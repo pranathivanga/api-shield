@@ -9,12 +9,12 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
-
 @Component
 public class RequestLoggingInterceptor implements HandlerInterceptor {
 
     private static final int LIMIT = 5;
     private static final int WINDOW_SECONDS = 60;
+    private static final int IDEMPOTENCY_TTL_SECONDS = 300;
 
     private final RedisTemplate<String, String> redisTemplate;
 
@@ -28,24 +28,26 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
             HttpServletResponse response,
             Object handler) throws IOException {
 
-        String path = request.getRequestURI();
-        String key = "rate_limit:" + path;
 
-        Long count = redisTemplate.opsForValue().increment(key);
+        // 🔹 Rate limiting
+        String path = request.getRequestURI();
+        String rateKey = "rate_limit:" + path;
+
+        Long count = redisTemplate.opsForValue().increment(rateKey);
 
         if (count != null && count == 1) {
-            redisTemplate.expire(key, WINDOW_SECONDS, TimeUnit.SECONDS);
+            redisTemplate.expire(rateKey, WINDOW_SECONDS, TimeUnit.SECONDS);
         }
 
         if (count != null && count > LIMIT) {
-            Long retryAfter = redisTemplate.getExpire(key, TimeUnit.SECONDS);
+            Long retryAfter = redisTemplate.getExpire(rateKey, TimeUnit.SECONDS);
 
             response.setStatus(429);
             response.setContentType("application/json");
             response.setHeader("Retry-After", String.valueOf(retryAfter));
 
             String body = String.format(
-                    "{\"status\":429,\"error\":\"RATE_LIMIT_EXCEEDED\",\"message\":\"Too many requests\",\"retryAfterSeconds\":%d}",
+                    "{\"status\":429,\"error\":\"RATE_LIMIT_EXCEEDED\",\"retryAfterSeconds\":%d}",
                     retryAfter
             );
 
@@ -55,4 +57,5 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
 
         return true;
     }
+    
 }
