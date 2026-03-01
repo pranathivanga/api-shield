@@ -6,7 +6,9 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.io.IOException;
 import java.util.concurrent.TimeUnit;
+
 
 @Component
 public class RequestLoggingInterceptor implements HandlerInterceptor {
@@ -24,7 +26,7 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
     public boolean preHandle(
             HttpServletRequest request,
             HttpServletResponse response,
-            Object handler) throws Exception {
+            Object handler) throws IOException {
 
         String path = request.getRequestURI();
         String key = "rate_limit:" + path;
@@ -36,11 +38,21 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
         }
 
         if (count != null && count > LIMIT) {
+            Long retryAfter = redisTemplate.getExpire(key, TimeUnit.SECONDS);
+
             response.setStatus(429);
-            response.getWriter().write("Too many requests. Try again later.");
-            return false; // BLOCK request
+            response.setContentType("application/json");
+            response.setHeader("Retry-After", String.valueOf(retryAfter));
+
+            String body = String.format(
+                    "{\"status\":429,\"error\":\"RATE_LIMIT_EXCEEDED\",\"message\":\"Too many requests\",\"retryAfterSeconds\":%d}",
+                    retryAfter
+            );
+
+            response.getWriter().write(body);
+            return false;
         }
 
-        return true; // ALLOW request
+        return true;
     }
 }
