@@ -39,7 +39,7 @@ It enforces rate limits, tier-based access control, idempotency, and automatic a
 
 ## 🏗 Architecture
 
-
+```
 Client
 ↓
 Idempotency Filter
@@ -51,7 +51,7 @@ Controller
 Redis (rate limits, violations, bans, idempotency)
 ↓
 H2 Database (user tiers)
-
+```
 
 ---
 
@@ -77,14 +77,14 @@ git clone <repo-url>
 cd api-shield
 ./mvnw spring-boot:run
 
-🔍 Testing
+## 🔍 Testing
 
-Use request header:
+# Use request header:
 
 X-User-Id: 101   (FREE)
 X-User-Id: 202   (PREMIUM)
 
-Behavior:
+# Behavior:
 
 FREE users → lower request limit
 
@@ -96,7 +96,7 @@ Rate limit exceeded → HTTP 429
 
 Idempotent POST requests return cached response
 
-📌 Status Codes
+## 📌 Status Codes
 
 200 – Request successful
 
