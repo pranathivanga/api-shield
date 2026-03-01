@@ -29,9 +29,23 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
             Object handler) throws IOException {
 
 
-        // 🔹 Rate limiting
+
+// 🔹 Rate limiting (user-based)
+        String userId = request.getHeader("X-User-Id");
+        String userTier = request.getHeader("X-User-Tier");
+
+        if (userId == null || userId.isBlank()) {
+            userId = "anonymous";
+        }
+
+        if (userTier == null || userTier.isBlank()) {
+            userTier = "FREE";
+        }
+
+        int userLimit = getLimitForTier(userTier);
+
         String path = request.getRequestURI();
-        String rateKey = "rate_limit:" + path;
+        String rateKey = "rate_limit:" + userId + ":" + path;
 
         Long count = redisTemplate.opsForValue().increment(rateKey);
 
@@ -39,7 +53,7 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
             redisTemplate.expire(rateKey, WINDOW_SECONDS, TimeUnit.SECONDS);
         }
 
-        if (count != null && count > LIMIT) {
+        if (count != null && count > userLimit) {
             Long retryAfter = redisTemplate.getExpire(rateKey, TimeUnit.SECONDS);
 
             response.setStatus(429);
@@ -47,15 +61,20 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
             response.setHeader("Retry-After", String.valueOf(retryAfter));
 
             String body = String.format(
-                    "{\"status\":429,\"error\":\"RATE_LIMIT_EXCEEDED\",\"retryAfterSeconds\":%d}",
-                    retryAfter
+                    "{\"status\":429,\"error\":\"RATE_LIMIT_EXCEEDED\",\"tier\":\"%s\",\"limit\":%d,\"retryAfterSeconds\":%d}",
+                    userTier, userLimit, retryAfter
             );
 
             response.getWriter().write(body);
             return false;
         }
-
         return true;
     }
-    
+    private int getLimitForTier(String tier) {
+        return switch (tier.toUpperCase()) {
+            case "PREMIUM" -> 20;
+            case "FREE" -> 5;
+            default -> 5;
+        };
+    }
 }
